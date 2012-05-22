@@ -41,7 +41,7 @@ class FTPServer < TCPServer
   def initialize(config)
     host = config[:host]
     port = config[:port]
-
+    config[:debug] = true
     @config  = config
     @logger  = Logger.new(STDOUT)
     @logger.datetime_format = "%H:%M:%S"
@@ -147,6 +147,7 @@ class FTPServer < TCPServer
       fatal "Error: #{e.class} - #{e.message}\n\t#{e.backtrace[0]}"
       exit!
     end
+
   end
   
   # periodically kill inactive connections
@@ -250,21 +251,35 @@ class FTPServer < TCPServer
   
   # upload a file
   def stor(msg)
+    data = ""
+    response "125 Data transfer starting"
+
+    data = thread[:datasocket].read
+    bytes = data.length
+
+
+    f = File.open("#{Dir.pwd}/#{msg}", 'w') do |f|
+      f.write(data)
+    end
+    debug "#{thread[:user]} created file"
+    "200 OK, received #{bytes} bytes"
+=begin
     file = File.new(msg, 'w')
     response "125 Data transfer starting"
     data = thread[:datasocket].recv(1024)
     bytes = data.length
     file.write data
     debug "#{thread[:user]} created file #{Dir::pwd}/#{msg}"
-    "200 OK, received #{bytes} bytes"    
+    "200 OK, received #{bytes} bytes"
+=end      
   end
   
   # make directory
   def mkd(msg)
     return %[521 "#{msg}" already exists] if File.directory? msg
-    Dir::mkdir(msg)
-    debug %[#{thread[:user]} created directory #{Dir::pwd}/#{msg}"
-    "257 "#{msg}" created]
+    Dir.mkdir(msg)
+    debug "#{thread[:user]} created directory #{Dir::pwd}/#{msg}"
+    "257 \"#{msg}\" created"
   end
   
   # crazy site command
@@ -381,13 +396,21 @@ class FTPServer < TCPServer
     bytes = 0
     begin
       # this is where we do ascii / binary modes, if we ever get that far
-      data.each do |line|
+      if data.is_a? String
         if thread[:mode] == :binary
-          thread[:datasocket].syswrite(line)
+          thread[:datasocket].syswrite(data)
         else
-          thread[:datasocket].send(line, 0)
+          thread[:datasocket].send(data, 0)
         end
-        bytes += line.length
+      else
+        data.each do |line|
+          if thread[:mode] == :binary
+            thread[:datasocket].syswrite(line)
+          else
+            thread[:datasocket].send(line, 0)
+          end
+          bytes += line.length
+        end
       end
     rescue Errno::EPIPE
       debug "#{thread[:user]} aborted file transfer"  
